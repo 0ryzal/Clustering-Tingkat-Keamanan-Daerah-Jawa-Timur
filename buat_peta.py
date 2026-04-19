@@ -58,10 +58,22 @@ FILES = sorted(glob.glob(os.path.join(DATA_DIR, "*.xlsx")))
 dfs   = [load_year_data(f) for f in FILES]
 df_raw = pd.concat(dfs, ignore_index=True)
 
+from scipy.stats import linregress
+def calc_slope(df_group):
+    df_sorted = df_group.sort_values("Tahun")
+    y = df_sorted["Risiko_100k"].values
+    if len(y) > 1:
+        return linregress(np.arange(len(y)), y).slope
+    return 0.0
+
+slope_df = df_raw.groupby("Kabupaten_Kota").apply(calc_slope).reset_index()
+slope_df.columns = ["Kabupaten_Kota", "Slope_Risiko"]
+
 df_profile = (df_raw
               .groupby("Kabupaten_Kota", sort=True)[FEATURE_COLS]
               .median()
               .reset_index())
+df_profile = df_profile.merge(slope_df, on="Kabupaten_Kota", how="left")
 
 print(f"✅ Data loaded: {df_profile.shape[0]} kabupaten/kota")
 
@@ -87,124 +99,105 @@ df_clean = detect_and_cap_iqr(df_profile, FEATURE_COLS)
 # 4. STANDARDISASI
 # ─────────────────────────────────────────────────────────────────────────────
 
-scaler   = StandardScaler()
-X_scaled = scaler.fit_transform(df_clean[FEATURE_COLS])
-
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. CLUSTERING — pilih K optimal
+# 5. HARDCODED CLUSTER ASSIGNMENT DARI MODEL.IPYNB
+#    Sumber: K-Means K=4 + Danger Score komposit di model.ipynb
+#    Di-hardcode agar konsisten — tidak re-run clustering sendiri
 # ─────────────────────────────────────────────────────────────────────────────
 
-sil_scores = {}
-for k in range(2, 8):
-    km = KMeans(n_clusters=k, random_state=RANDOM_STATE, n_init=10)
-    labels = km.fit_predict(X_scaled)
-    sil_scores[k] = silhouette_score(X_scaled, labels)
+# Format: "Nama Kab/Kota" → ("Risk Label", "#HexColor", "🎨Emoji", Danger_Score)
+CLUSTER_MAP = {
+    # 🔴 High Risk — Klaster 2, Danger Score ~47
+    "Banyuwangi"       : ("High Risk",          "#e74c3c", "🔴", 47.08),
+    "Bojonegoro"       : ("High Risk",          "#e74c3c", "🔴", 47.08),
+    "Gresik"           : ("High Risk",          "#e74c3c", "🔴", 47.08),
+    "Jember"           : ("High Risk",          "#e74c3c", "🔴", 47.08),
+    "Jombang"          : ("High Risk",          "#e74c3c", "🔴", 47.08),
+    "Kediri"           : ("High Risk",          "#e74c3c", "🔴", 47.08),
+    "Kota Surabaya"    : ("High Risk",          "#e74c3c", "🔴", 47.08),
+    "Lamongan"         : ("High Risk",          "#e74c3c", "🔴", 47.08),
+    "Malang"           : ("High Risk",          "#e74c3c", "🔴", 47.08),
+    "Pasuruan"         : ("High Risk",          "#e74c3c", "🔴", 47.08),
+    "Sidoarjo"         : ("High Risk",          "#e74c3c", "🔴", 47.08),
+    "Tulungagung"      : ("High Risk",          "#e74c3c", "🔴", 47.08),
+    # 🟠 Moderate-High Risk — Klaster 4, Danger Score ~38
+    "Kota Kediri"      : ("Moderate-High Risk", "#e67e22", "🟠", 38.45),
+    "Kota Mojokerto"   : ("Moderate-High Risk", "#e67e22", "🟠", 38.45),
+    "Kota Pasuruan"    : ("Moderate-High Risk", "#e67e22", "🟠", 38.45),
+    "Kota Probolinggo" : ("Moderate-High Risk", "#e67e22", "🟠", 38.45),
+    "Magetan"          : ("Moderate-High Risk", "#e67e22", "🟠", 38.45),
+    "Ngawi"            : ("Moderate-High Risk", "#e67e22", "🟠", 38.45),
+    # 🟡 Moderate-Low Risk — Klaster 3, Danger Score ~35
+    "Bondowoso"        : ("Moderate-Low Risk",  "#f1c40f", "🟡", 34.62),
+    "Kota Malang"      : ("Moderate-Low Risk",  "#f1c40f", "🟡", 34.62),
+    "Lumajang"         : ("Moderate-Low Risk",  "#f1c40f", "🟡", 34.62),
+    "Mojokerto"        : ("Moderate-Low Risk",  "#f1c40f", "🟡", 34.62),
+    "Pamekasan"        : ("Moderate-Low Risk",  "#f1c40f", "🟡", 34.62),
+    "Situbondo"        : ("Moderate-Low Risk",  "#f1c40f", "🟡", 34.62),
+    "Sumenep"          : ("Moderate-Low Risk",  "#f1c40f", "🟡", 34.62),
+    "Tuban"            : ("Moderate-Low Risk",  "#f1c40f", "🟡", 34.62),
+    # 🟢 Safe Zone — Klaster 1, Danger Score ~23
+    "Bangkalan"        : ("Safe Zone",          "#2ecc71", "🟢", 23.14),
+    "Blitar"           : ("Safe Zone",          "#2ecc71", "🟢", 23.14),
+    "Kota Batu"        : ("Safe Zone",          "#2ecc71", "🟢", 23.14),
+    "Kota Blitar"      : ("Safe Zone",          "#2ecc71", "🟢", 23.14),
+    "Kota Madiun"      : ("Safe Zone",          "#2ecc71", "🟢", 23.14),
+    "Madiun"           : ("Safe Zone",          "#2ecc71", "🟢", 23.14),
+    "Nganjuk"          : ("Safe Zone",          "#2ecc71", "🟢", 23.14),
+    "Pacitan"          : ("Safe Zone",          "#2ecc71", "🟢", 23.14),
+    "Ponorogo"         : ("Safe Zone",          "#2ecc71", "🟢", 23.14),
+    "Probolinggo"      : ("Safe Zone",          "#2ecc71", "🟢", 23.14),
+    "Sampang"          : ("Safe Zone",          "#2ecc71", "🟢", 23.14),
+    "Trenggalek"       : ("Safe Zone",          "#2ecc71", "🟢", 23.14),
+}
 
-OPTIMAL_K = max(sil_scores, key=sil_scores.get)
-print(f"✅ Optimal K = {OPTIMAL_K}  (silhouette = {sil_scores[OPTIMAL_K]:.4f})")
+# Terapkan ke df_clean
+df_clean["Risk_Label"]   = df_clean["Kabupaten_Kota"].map(lambda n: CLUSTER_MAP.get(n, ("No Data","#AAAAAA","⬜",0))[0])
+df_clean["Risk_Color"]   = df_clean["Kabupaten_Kota"].map(lambda n: CLUSTER_MAP.get(n, ("No Data","#AAAAAA","⬜",0))[1])
+df_clean["Risk_Emoji"]   = df_clean["Kabupaten_Kota"].map(lambda n: CLUSTER_MAP.get(n, ("No Data","#AAAAAA","⬜",0))[2])
+df_clean["Danger_Score"] = df_clean["Kabupaten_Kota"].map(lambda n: CLUSTER_MAP.get(n, ("No Data","#AAAAAA","⬜",0))[3])
 
-km_final  = KMeans(n_clusters=OPTIMAL_K, random_state=RANDOM_STATE, n_init=10)
-df_clean  = df_clean.copy()
-df_clean["Cluster_KMeans"] = km_final.fit_predict(X_scaled)
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 6. DANGER SCORE & RISK LABELS
-# ─────────────────────────────────────────────────────────────────────────────
-# Tambah kolom kasus tidak terselesaikan di level daerah (sebelum centroid)
+# Kolom Kasus Tidak Selesai (untuk popup)
 df_clean["Kasus_Tidak_Selesai"] = (
     df_clean["Jumlah_Kejahatan"] * (1 - df_clean["Persen_Penyelesaian"] / 100)
 ).round(1)
 
-centroid_tbl = (df_clean
-                .groupby("Cluster_KMeans")[FEATURE_COLS + ["Kasus_Tidak_Selesai"]]
-                .mean()
-                .rename(columns={
-                    "Jumlah_Kejahatan"   : "Jml Kejahatan",
-                    "Risiko_100k"        : "Risiko/100k",
-                    "Persen_Penyelesaian": "% Penyelesaian",
-                    "Selang_Waktu"       : "Selang Waktu",
-                    "Kasus_Tidak_Selesai": "Kasus Tdk Selesai",
-                })
-                .reset_index())
+print("✅ Cluster assignment dari model.ipynb diterapkan:")
+for label in ["High Risk", "Moderate-High Risk", "Moderate-Low Risk", "Safe Zone"]:
+    members = sorted(df_clean.loc[df_clean["Risk_Label"] == label, "Kabupaten_Kota"].tolist())
+    emoji   = CLUSTER_MAP[members[0]][2] if members else ""
+    danger  = CLUSTER_MAP[members[0]][3] if members else 0
+    print(f"   {emoji} {label} ({len(members)} daerah) | Danger={danger}")
+    print(f"      {', '.join(members)}")
 
-centroid_tbl["N Daerah"] = (df_clean.groupby("Cluster_KMeans")
-                             .size().values)
+# Buat cluster_to_risk & centroid_tbl_s agar blok downstream tetap kompatibel
+_label_order = ["High Risk", "Moderate-High Risk", "Moderate-Low Risk", "Safe Zone"]
+_colors      = {"High Risk": "#e74c3c", "Moderate-High Risk": "#e67e22",
+                "Moderate-Low Risk": "#f1c40f", "Safe Zone": "#2ecc71"}
+_emojis      = {"High Risk": "🔴", "Moderate-High Risk": "🟠",
+                "Moderate-Low Risk": "🟡", "Safe Zone": "🟢"}
+_dangers     = {"High Risk": 47.08, "Moderate-High Risk": 38.45,
+                "Moderate-Low Risk": 34.62, "Safe Zone": 23.14}
 
-max_crime      = centroid_tbl["Jml Kejahatan"].max()
-max_risk       = centroid_tbl["Risiko/100k"].max()
-max_unresolved = centroid_tbl["Kasus Tdk Selesai"].max()
-max_selang     = centroid_tbl["Selang Waktu"].max()
-
-# ── Formula Danger Score (direvisi) ───────────────────────────────────────────
-# Komponen 1 (35%): Kasus Tidak Terselesaikan — makin banyak kasus yg gagal
-#                   diselesaikan = gabungan volume kejahatan + kegagalan polisi
-# Komponen 2 (30%): Risiko per 100k penduduk — ukuran risiko relatif terhadap populasi
-# Komponen 3 (20%): Volume Kejahatan — korban tetap ada walau kasus 'selesai'
-# Komponen 4 (15%): Selang Waktu — makin PENDEK = semakin sering terjadi = lebih bahaya
-#                   (DIBALIK: 1 - nilai/max)
-centroid_tbl["Danger_Score"] = (
-    (centroid_tbl["Kasus Tdk Selesai"] / max_unresolved)       * 35 +
-    (centroid_tbl["Risiko/100k"]       / max_risk)             * 30 +
-    (centroid_tbl["Jml Kejahatan"]     / max_crime)            * 20 +
-    (1 - centroid_tbl["Selang Waktu"]  / max_selang)           * 15
-).round(2)
-
-centroid_tbl_s = (centroid_tbl
-                  .sort_values("Danger_Score", ascending=False)
-                  .reset_index(drop=True))
-centroid_tbl_s["Rank"] = centroid_tbl_s.index  # 0 = highest risk
-
-RISK_LABELS = {
-    0: ("High Risk",         "#e74c3c", "🔴"),
-    1: ("Moderate-High Risk","#e67e22", "🟠"),
-    2: ("Moderate-Low Risk", "#f1c40f", "🟡"),
-    3: ("Safe Zone",         "#2ecc71", "🟢"),
-}
-
-
-def get_risk_label(rank, total):
-    pct = rank / max(total - 1, 1)
-    if pct < 0.25:   return "High Risk",          "#e74c3c", "🔴"
-    elif pct < 0.50: return "Moderate-High Risk",  "#e67e22", "🟠"
-    elif pct < 0.75: return "Moderate-Low Risk",   "#f1c40f", "🟡"
-    else:             return "Safe Zone",           "#2ecc71", "🟢"
-
-
-centroid_tbl_s["Risk_Label"], centroid_tbl_s["Risk_Color"], centroid_tbl_s["Risk_Emoji"] = zip(
-    *[get_risk_label(i, len(centroid_tbl_s)) for i in range(len(centroid_tbl_s))]
-)
-
-# Map cluster ID → risk info
 cluster_to_risk = {}
-for _, row in centroid_tbl_s.iterrows():
-    cid = int(row["Cluster_KMeans"])
-    cluster_to_risk[cid] = {
-        "label" : row["Risk_Label"],
-        "color" : row["Risk_Color"],
-        "emoji" : row["Risk_Emoji"],
-        "danger": row["Danger_Score"],
-        "n"     : int(row["N Daerah"]),
+for i, lbl in enumerate(_label_order):
+    grp = df_clean[df_clean["Risk_Label"] == lbl]
+    cluster_to_risk[i] = {
+        "label" : lbl,
+        "color" : _colors[lbl],
+        "emoji" : _emojis[lbl],
+        "danger": _dangers[lbl],
+        "n"     : len(grp),
         "stats" : {
-            "Jml Kejahatan"    : round(row["Jml Kejahatan"],      1),
-            "Kasus Tdk Selesai": round(row["Kasus Tdk Selesai"],  1),
-            "Risiko/100k"      : round(row["Risiko/100k"],        1),
-            "% Penyelesaian"   : round(row["% Penyelesaian"],     2),
-            "Selang Waktu(j)"  : round(row["Selang Waktu"],       1),
+            "Jml Kejahatan"    : round(grp["Jumlah_Kejahatan"].mean(),    1),
+            "Kasus Tdk Selesai": round(grp["Kasus_Tidak_Selesai"].mean(), 1),
+            "Risiko/100k"      : round(grp["Risiko_100k"].mean(),         1),
+            "% Penyelesaian"   : round(grp["Persen_Penyelesaian"].mean(), 2),
+            "Selang Waktu(j)"  : round(grp["Selang_Waktu"].mean(),        1),
         }
     }
-
-df_clean["Risk_Label"] = df_clean["Cluster_KMeans"].map(
-    lambda x: cluster_to_risk[x]["label"])
-df_clean["Risk_Color"] = df_clean["Cluster_KMeans"].map(
-    lambda x: cluster_to_risk[x]["color"])
-df_clean["Danger_Score"] = df_clean["Cluster_KMeans"].map(
-    lambda x: cluster_to_risk[x]["danger"])
-
-print("✅ Risk labels assigned")
-for cid, info in cluster_to_risk.items():
-    members = df_clean.loc[df_clean["Cluster_KMeans"] == cid, "Kabupaten_Kota"].tolist()
-    print(f"   Cluster {cid+1} → {info['emoji']} {info['label']}  | Danger={info['danger']} | N={info['n']}")
-    print(f"      {', '.join(sorted(members))}")
+    # Tambah kolom Cluster_KMeans palsu (virtual) agar lookup tidak error
+    df_clean.loc[df_clean["Risk_Label"] == lbl, "Cluster_KMeans"] = i
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. MAPPING: Data ↔ GeoJSON
@@ -216,6 +209,9 @@ NAME_MAP = {
 }
 
 df_clean["GeoName"] = df_clean["Kabupaten_Kota"].replace(NAME_MAP)
+
+threshold_bahaya = max(df_clean["Slope_Risiko"].quantile(0.75), 0.1)
+df_clean["Hidden_Risk"] = (df_clean["Risk_Label"].str.contains("Safe|Low")) & (df_clean["Slope_Risiko"] > threshold_bahaya)
 
 with open(GEOJSON, "r", encoding="utf-8") as f:
     geo = json.load(f)
@@ -252,6 +248,8 @@ for feat in geo["features"]:
             "risiko_100k"     : float(row["Risiko_100k"]),
             "persen_selesai"  : float(row["Persen_Penyelesaian"]),
             "selang_waktu"    : float(row["Selang_Waktu"]),
+            "slope_risiko"    : float(row["Slope_Risiko"]),
+            "hidden_risk"     : bool(row["Hidden_Risk"]),
         }
     else:
         props = {
@@ -265,6 +263,8 @@ for feat in geo["features"]:
             "risiko_100k" : None,
             "persen_selesai": None,
             "selang_waktu": None,
+            "slope_risiko"    : None,
+            "hidden_risk"     : False,
         }
     feature_list.append({
         "type"      : "Feature",
@@ -282,22 +282,17 @@ enriched_geo = {
 # ─────────────────────────────────────────────────────────────────────────────
 
 legend_items = []
-for _, row in centroid_tbl_s.iterrows():
-    cid = int(row["Cluster_KMeans"])
-    members = sorted(df_clean.loc[df_clean["Cluster_KMeans"] == cid, "Kabupaten_Kota"].tolist())
+for i, lbl in enumerate(_label_order):
+    info    = cluster_to_risk[i]
+    members = sorted(df_clean.loc[df_clean["Risk_Label"] == lbl, "Kabupaten_Kota"].tolist())
     legend_items.append({
-        "label"  : row["Risk_Label"],
-        "color"  : row["Risk_Color"],
-        "emoji"  : row["Risk_Emoji"],
-        "danger" : float(row["Danger_Score"]),
-        "n"      : int(row["N Daerah"]),
+        "label"  : lbl,
+        "color"  : info["color"],
+        "emoji"  : info["emoji"],
+        "danger" : info["danger"],
+        "n"      : info["n"],
         "members": members,
-        "stats"  : {
-            "Jml Kejahatan"  : round(float(row["Jml Kejahatan"]),  1),
-            "Risiko/100k"    : round(float(row["Risiko/100k"]),    1),
-            "% Penyelesaian" : round(float(row["% Penyelesaian"]), 2),
-            "Selang Waktu(j)": round(float(row["Selang Waktu"]),   1),
-        }
+        "stats"  : info["stats"],
     })
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -822,10 +817,11 @@ function styleHighlight(feature) {{
 function makePopup(p) {{
   const ds = p.danger_score !== null ? p.danger_score.toFixed(1) : '—';
   return `
-    <div class="popup-title">${{p.name}}</div>
+    <div class="popup-title">${{p.name}} ${{p.hidden_risk ? '⚠️' : ''}}</div>
     <div class="popup-risk" style="background:${{p.risk_color}}22; color:${{p.risk_color}}; border:1px solid ${{p.risk_color}}55">
       ${{p.risk_emoji}} ${{p.risk_label}}
     </div>
+    ${{p.hidden_risk ? `<div style="background:#e74c3c; color:white; padding:4px; font-size:0.75rem; border-radius:4px; margin-bottom:8px; font-weight:bold; text-align:center;">🔥 Tren Memburuk (Prioritas!)</div>` : ''}}
     <div class="popup-row"><span class="popup-key">Danger Score</span><span class="popup-val">${{ds}} / 100</span></div>
     <div class="popup-row"><span class="popup-key">Jml. Kejahatan</span><span class="popup-val">${{p.jumlah_kejahatan !== null ? Math.round(p.jumlah_kejahatan) : '—'}}</span></div>
     <div class="popup-row"><span class="popup-key">Risiko / 100k</span><span class="popup-val">${{p.risiko_100k !== null ? p.risiko_100k.toFixed(1) : '—'}}</span></div>
@@ -851,6 +847,7 @@ function updateInfoPanel(p) {{
       <div class="ip-row"><span class="ip-key">Danger Score</span><span class="ip-value">${{ds}} / 100</span></div>
       <div class="ip-row"><span class="ip-key">Jml. Kejahatan</span><span class="ip-value">${{p.jumlah_kejahatan !== null ? Math.round(p.jumlah_kejahatan) : '—'}}</span></div>
       <div class="ip-row"><span class="ip-key">Risiko / 100k pend.</span><span class="ip-value">${{p.risiko_100k !== null ? p.risiko_100k.toFixed(1) : '—'}}</span></div>
+      <div class="ip-row"><span class="ip-key">Tren Risiko 2020-2024</span><span class="ip-value" style="color:${{p.slope_risiko > 0 ? '#e74c3c' : '#2ecc71'}}">${{p.slope_risiko !== null ? (p.slope_risiko > 0 ? '↗ +' : '↘ ') + p.slope_risiko.toFixed(2) : '—'}}</span></div>
       <div class="ip-row"><span class="ip-key">% Penyelesaian</span><span class="ip-value">${{p.persen_selesai !== null ? p.persen_selesai.toFixed(2) + ' %' : '—'}}</span></div>
       <div class="ip-row"><span class="ip-key">Selang Waktu</span><span class="ip-value">${{p.selang_waktu !== null ? Math.round(p.selang_waktu) + ' jam' : '—'}}</span></div>
     </div>
